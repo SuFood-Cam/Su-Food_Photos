@@ -1,3 +1,3 @@
 # 📄 圖片永久 jsDelivr 加速網址清單
 
-目前倉庫中還沒有上傳任何圖片檔案。
+- https://cdn.jsdelivr.net/gh/SuFood-Cam/Su-Food_Photos@main/Store/50.jpg
