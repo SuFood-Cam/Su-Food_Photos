@@ -1,3 +1,4 @@
+
 name: Auto Generate jsDelivr URLs
 
 on:
@@ -17,55 +18,92 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.x'
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
 
-    - name: Generate URL List
-      run: |
-        import os
-        
-        username = "${{ github.repository_owner }}"
-        repo = "Su-Food_Photos"
-        base_url = f"https://jsdelivr.net{username}/{repo}@main"
-        
-        valid_extensions = ('.jpg', '.jpeg', '.png', '.gif', '.webp')
-        url_list = []
-        
-        for root, dirs, files in os.walk('.'):
-            # 排除隱藏資料夾如 .github 與 .git
-            if '.github' in root or '.git' in root:
-                continue
-            for file in files:
-                if file.lower().endswith(valid_extensions):
-                    # 計算相對路徑並轉換成 URL
-                    relative_path = os.path.relpath(os.path.join(root, file), '.')
-                    # 轉換 Windows 路徑斜線
-                    relative_path = relative_path.replace('\\', '/')
-                    # 如果圖片直接在根目錄，去掉前面的 './'
-                    if relative_path.startswith('./'):
-                        relative_path = relative_path[2:]
-                    elif relative_path == '.':
-                        continue
-                    
-                    url_list.append(f"{base_url}/{relative_path}")
-        
-        with open('CDN_URLS.md', 'w', encoding='utf-8') as f:
-            f.write("# 📄 圖片永久 jsDelivr 加速網址清單\n\n")
-            if url_list:
-                for url in sorted(url_list):
-                    f.write(f"- {url}\n")
-            else:
-                f.write("目前倉庫中還沒有上傳任何圖片檔案。\n")
+      - name: Generate URL List
+        env:
+          GITHUB_USERNAME: ${{ github.repository_owner }}
+          REPO_NAME: Su-Food_Photos
+        run: |
+          python - <<'PY'
+          import os
+          from urllib.parse import quote
 
-    - name: Commit and Push changes
-      run: |
-        git config --global user.name "GitHub Actions"
-        git config --global user.email "actions@github.com"
-        git add CDN_URLS.md
-        git diff --quiet && git diff --staged --quiet || (git commit -m "🤖 自動更新 jsDelivr 網址清單" && git push)
+          username = os.environ["GITHUB_USERNAME"]
+          repo = os.environ["REPO_NAME"]
+
+          base_url = f"https://cdn.jsdelivr.net/gh/{username}/{repo}@main"
+
+          valid_extensions = (
+              '.jpg',
+              '.jpeg',
+              '.png',
+              '.gif',
+              '.webp'
+          )
+
+          url_list = []
+
+          for root, dirs, files in os.walk('.'):
+              # 排除 GitHub 隱藏資料夾
+              dirs[:] = [
+                  d for d in dirs
+                  if d not in ('.git', '.github')
+                  and not d.startswith('.')
+              ]
+
+              for file in files:
+                  if file.lower().endswith(valid_extensions):
+
+                      relative_path = os.path.relpath(
+                          os.path.join(root, file),
+                          '.'
+                      )
+
+                      relative_path = relative_path.replace('\\', '/')
+
+                      encoded_path = quote(
+                          relative_path,
+                          safe='/'
+                      )
+
+                      url = f"{base_url}/{encoded_path}"
+
+                      url_list.append(url)
+
+          url_list = sorted(set(url_list))
+
+          with open('CDN_URLS.md', 'w', encoding='utf-8') as f:
+
+              f.write("# 📄 圖片永久 jsDelivr 加速網址清單\n\n")
+
+              if url_list:
+                  for url in url_list:
+                      f.write(f"- {url}\n")
+              else:
+                  f.write("目前倉庫中還沒有上傳任何圖片檔案。\n")
+
+          print(f"成功產生 {len(url_list)} 個圖片 CDN 網址")
+          PY
+
+      - name: Commit and Push changes
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+
+          git add CDN_URLS.md
+
+          if git diff --cached --quiet; then
+            echo "CDN_URLS.md 沒有變更，不需要提交。"
+          else
+            git commit -m "🤖 自動更新 jsDelivr 網址清單"
+            git push origin main
+          fi
