@@ -28,70 +28,56 @@ jobs:
         with:
           python-version: '3.x'
 
-      - name: Generate URL List
+      - name: Generate CDN Image Gallery
         env:
-          GITHUB_USERNAME: ${{ github.repository_owner }}
-          REPO_NAME: Su-Food_Photos
+          GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
           python - <<'PY'
           import os
           from urllib.parse import quote
 
-          username = os.environ["GITHUB_USERNAME"]
-          repo = os.environ["REPO_NAME"]
+          repository = os.environ["GITHUB_REPOSITORY"]
+          base_url = f"https://cdn.jsdelivr.net/gh/{repository}@main"
 
-          base_url = f"https://cdn.jsdelivr.net/gh/{username}/{repo}@main"
-
-          valid_extensions = (
-              '.jpg',
-              '.jpeg',
-              '.png',
-              '.gif',
-              '.webp'
-          )
-
-          url_list = []
+          extensions = ('.jpg', '.jpeg', '.png', '.gif', '.webp')
+          images = []
 
           for root, dirs, files in os.walk('.'):
-              # 排除 GitHub 隱藏資料夾
               dirs[:] = [
                   d for d in dirs
                   if d not in ('.git', '.github')
                   and not d.startswith('.')
               ]
 
-              for file in files:
-                  if file.lower().endswith(valid_extensions):
+              for filename in files:
+                  if filename.lower().endswith(extensions):
+                      path = os.path.relpath(
+                          os.path.join(root, filename), '.'
+                      ).replace('\\', '/')
 
-                      relative_path = os.path.relpath(
-                          os.path.join(root, file),
-                          '.'
-                      )
+                      url = base_url + '/' + quote(path, safe='/')
+                      images.append((path, filename, url))
 
-                      relative_path = relative_path.replace('\\', '/')
-
-                      encoded_path = quote(
-                          relative_path,
-                          safe='/'
-                      )
-
-                      url = f"{base_url}/{encoded_path}"
-
-                      url_list.append(url)
-
-          url_list = sorted(set(url_list))
+          images.sort(key=lambda x: x[0].lower())
 
           with open('CDN_URLS.md', 'w', encoding='utf-8') as f:
+              f.write("# 🍽️ Su Food 餐點圖片 CDN 圖庫\n\n")
+              f.write(f"圖片總數：{len(images)} 張\n\n")
+              f.write("---\n\n")
 
-              f.write("# 📄 圖片永久 jsDelivr 加速網址清單\n\n")
+              for path, filename, url in images:
+                  f.write(f"### {filename}\n\n")
+                  f.write(f"**圖片路徑：** `{path}`\n\n")
 
-              if url_list:
-                  for url in url_list:
-                      f.write(f"- {url}\n")
-              else:
-                  f.write("目前倉庫中還沒有上傳任何圖片檔案。\n")
+                  # 點擊縮圖直接開啟原始圖片
+                  f.write(f"[![{filename}]({url})]({url})\n\n")
 
-          print(f"成功產生 {len(url_list)} 個圖片 CDN 網址")
+                  # 提供可直接使用的 CDN 網址
+                  f.write("**CDN URL：**\n\n")
+                  f.write(f"`{url}`\n\n")
+                  f.write("---\n\n")
+
+          print(f"成功產生 {len(images)} 張圖片的 CDN 圖庫")
           PY
 
       - name: Commit and Push changes
@@ -102,8 +88,8 @@ jobs:
           git add CDN_URLS.md
 
           if git diff --cached --quiet; then
-            echo "CDN_URLS.md 沒有變更，不需要提交。"
+            echo "No changes detected."
           else
-            git commit -m "🤖 自動更新 jsDelivr 網址清單"
+            git commit -m "🤖 自動更新餐點圖片 CDN 圖庫"
             git push origin main
           fi
