@@ -1,230 +1,156 @@
 
-name: Auto Generate Store CDN Galleries
-
-on:
-  push:
-    branches:
-      - main
-    paths:
-      - '**/*.jpg'
-      - '**/*.jpeg'
-      - '**/*.png'
-      - '**/*.gif'
-      - '**/*.webp'
-
-permissions:
-  contents: write
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.x'
-
-      - name: Generate Store CDN Galleries
+      - name: Generate Store and Folder CDN Galleries
         env:
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
           python - <<'PY'
           import os
-          import re
           import shutil
-          import hashlib
           from urllib.parse import quote
 
-          repository = os.environ["GITHUB_REPOSITORY"]
-          base_url = f"https://cdn.jsdelivr.net/gh/{repository}@main"
+          repo = os.environ["GITHUB_REPOSITORY"]
+          base = f"https://cdn.jsdelivr.net/gh/{repo}@main"
 
-          EXTENSIONS = ('.jpg', '.jpeg', '.png', '.gif', '.webp')
-          PAGE_SIZE = 50
+          extensions = ('.jpg', '.jpeg', '.png', '.gif', '.webp')
+          page_size = 50
 
-          def slugify(value):
-              slug = re.sub(r'[^a-zA-Z0-9_-]+', '-', value).strip('-')
-              digest = hashlib.sha1(value.encode('utf-8')).hexdigest()[:8]
-              return f"{slug[:40] or 'category'}-{digest}"
+          ignored = {'.git', '.github', 'CDN_PAGES'}
 
-          def collect_images(folder):
-              result = {}
+          def get_images(folder):
+              result = []
 
               for root, dirs, files in os.walk(folder):
                   dirs[:] = sorted([
                       d for d in dirs
-                      if d not in ('.git', '.github', 'CDN_PAGES')
-                      and not d.startswith('.')
+                      if d not in ignored and not d.startswith('.')
                   ])
 
-                  for filename in files:
-                      if not filename.lower().endswith(EXTENSIONS):
-                          continue
+                  for name in files:
+                      if name.lower().endswith(extensions):
+                          full = os.path.join(root, name)
+                          relative = os.path.relpath(full, '.')
+                          relative = relative.replace('\\', '/')
 
-                      full_path = os.path.join(root, filename)
-                      relative = os.path.relpath(full_path, folder)
-                      relative = relative.replace('\\', '/')
+                          result.append({
+                              'name': name,
+                              'path': relative,
+                              'url': base + '/' + quote(relative, safe='/')
+                          })
 
-                      category = os.path.dirname(relative) or '店家根目錄'
+              return sorted(result, key=lambda x: x['path'].lower())
 
-                      url = (
-                          base_url + '/' +
-                          quote(
-                              os.path.relpath(full_path, '.').replace('\\', '/'),
-                              safe='/'
-                          )
-                      )
+          def write_gallery(folder, images, title):
+              os.makedirs(folder, exist_ok=True)
 
-                      result.setdefault(category, []).append({
-                          'name': filename,
-                          'path': relative,
-                          'url': url
-                      })
+              page_dir = os.path.join(folder, 'CDN_PAGES')
 
-              for category in result:
-                  result[category].sort(
-                      key=lambda x: x['path'].lower()
-                  )
-
-              return result
-
-          def generate_store(store, categories):
-              page_dir = os.path.join(store, 'CDN_PAGES')
-
-              # 清除舊分頁，避免刪除圖片後留下過期資料
               if os.path.exists(page_dir):
                   shutil.rmtree(page_dir)
 
               os.makedirs(page_dir, exist_ok=True)
 
-              total = sum(len(items) for items in categories.values())
+              pages = [
+                  images[i:i + page_size]
+                  for i in range(0, len(images), page_size)
+              ]
 
-              index_path = os.path.join(store, 'CDN_URLS.md')
+              md = os.path.join(folder, 'CDN_URLS.md')
 
-              with open(index_path, 'w', encoding='utf-8') as f:
-                  f.write(f"# 🏪 {store}｜餐點圖片 CDN 管理\n\n")
-                  f.write(f"**店家：** {store}  \n")
-                  f.write(f"**圖片總數：** {total} 張  \n")
-                  f.write(f"**分類數量：** {len(categories)} 個  \n")
-                  f.write(f"**每頁圖片：** {PAGE_SIZE} 張\n\n")
+              with open(md, 'w', encoding='utf-8') as f:
+                  f.write(f"# 🍽️ {title} CDN 圖片清單\n\n")
+                  f.write(f"圖片總數：{len(images)} 張\n\n")
+                  f.write("## 圖片分類與分頁\n\n")
 
-                  f.write("---\n\n")
-                  f.write("## 📂 餐點分類目錄\n\n")
-
-                  for category, images in sorted(categories.items()):
-                      pages = [
-                          images[i:i + PAGE_SIZE]
-                          for i in range(0, len(images), PAGE_SIZE)
-                      ]
-
-                      category_slug = slugify(category)
+                  for number, page in enumerate(pages, 1):
+                      filename = f"Page_{number:03d}.md"
 
                       f.write(
-                          f"### 📁 {category}（{len(images)} 張）\n\n"
+                          f"- [第 {number} 頁"
+                          f"（{len(page)} 張）]"
+                          f"(CDN_PAGES/{filename})\n"
                       )
 
-                      for page_number, page_images in enumerate(pages, 1):
-                          page_name = (
-                              f"{category_slug}_{page_number:03d}.md"
+                      with open(
+                          os.path.join(page_dir, filename),
+                          'w',
+                          encoding='utf-8'
+                      ) as pf:
+                          pf.write(f"# {title}｜第 {number} 頁\n\n")
+                          pf.write(
+                              "[返回圖片清單](../CDN_URLS.md)\n\n"
                           )
 
-                          page_relative = (
-                              f"CDN_PAGES/{page_name}"
-                          )
+                          for image in page:
+                              name = image['name']
+                              url = image['url']
 
-                          f.write(
-                              f"- [第 {page_number} 頁"
-                              f"（{len(page_images)} 張）]"
-                              f"({page_relative})\n"
-                          )
+                              pf.write(f"## {name}\n\n")
+                              pf.write(f"[![{name}]({url})]({url})\n\n")
+                              pf.write(f"`{url}`\n\n---\n\n")
 
-                          page_path = os.path.join(page_dir, page_name)
+              print(f"完成：{folder}，{len(images)} 張圖片")
 
-                          with open(page_path, 'w', encoding='utf-8') as pf:
-                              pf.write(
-                                  f"# 🏪 {store}｜{category}\n\n"
-                              )
-                              pf.write(
-                                  f"**第 {page_number} 頁**"
-                                  f"｜共 {len(page_images)} 張\n\n"
-                              )
-                              pf.write(
-                                  "[返回店家圖片總覽](../CDN_URLS.md)\n\n"
-                              )
-                              pf.write("---\n\n")
-
-                              for img in page_images:
-                                  name = img['name']
-                                  url = img['url']
-                                  path = img['path']
-
-                                  pf.write(f"### {name}\n\n")
-                                  pf.write(f"**檔案路徑：** `{path}`\n\n")
-                                  pf.write(
-                                      f"[![{name}]({url})]({url})\n\n"
-                                  )
-                                  pf.write("**CDN URL：**\n\n")
-                                  pf.write(f"`{url}`\n\n")
-                                  pf.write("---\n\n")
-
-                      f.write("\n")
-
-              print(f"完成店家：{store}，共 {total} 張圖片")
-
-              return total
-
-          # 掃描所有第一層店家資料夾
-          stores = {}
-
-          top_dirs = sorted([
+          # 第一層資料夾視為店家
+          stores = sorted([
               d for d in os.listdir('.')
               if os.path.isdir(d)
               and not d.startswith('.')
-              and d not in ('CDN_PAGES',)
+              and d not in ignored
           ])
 
-          for store in top_dirs:
-              categories = collect_images(store)
+          store_summary = []
 
-              if categories:
-                  stores[store] = categories
-                  generate_store(store, categories)
+          for store in stores:
+              # 找出店家所有圖片
+              store_images = get_images(store)
 
-          # 產生總覽
-          total_images = 0
+              if not store_images:
+                  continue
 
+              # 產生店家總清單
+              write_gallery(store, store_images, store)
+
+              # 找出店家內所有有圖片的資料夾
+              for root, dirs, files in os.walk(store):
+                  dirs[:] = [
+                      d for d in dirs
+                      if d not in ignored and not d.startswith('.')
+                  ]
+
+                  folder_images = [
+                      f for f in files
+                      if f.lower().endswith(extensions)
+                  ]
+
+                  if folder_images:
+                      relative_folder = os.path.relpath(root, '.')
+                      images = get_images(root)
+
+                      # 每個餐點資料夾產生獨立 CDN_URLS.md
+                      write_gallery(
+                          root,
+                          images,
+                          relative_folder
+                      )
+
+              store_summary.append({
+                  'name': store,
+                  'count': len(store_images)
+              })
+
+          # 產生 Repository 根目錄總覽
           with open('CDN_URLS.md', 'w', encoding='utf-8') as f:
-              f.write("# 🍽️ Su Food｜全店家 CDN 圖片管理中心\n\n")
-              f.write(f"**店家總數：** {len(stores)} 家  \n")
+              f.write("# 🍽️ Su Food CDN 圖片總管理中心\n\n")
+              f.write(f"店家總數：{len(store_summary)} 家\n\n")
 
-              for store, categories in stores.items():
-                  count = sum(len(v) for v in categories.values())
-                  total_images += count
+              for item in store_summary:
+                  name = item['name']
+                  link = quote(f"{name}/CDN_URLS.md", safe='/')
 
-              f.write(f"**圖片總數：** {total_images} 張\n\n")
-              f.write("---\n\n")
-              f.write("## 🏪 店家圖片清單\n\n")
+                  f.write(f"## 🏪 [{name}]({link})\n\n")
+                  f.write(f"圖片數量：{item['count']} 張\n\n")
 
-              for store, categories in sorted(stores.items()):
-                  count = sum(len(v) for v in categories.values())
-                  category_count = len(categories)
-
-                  link = quote(f"{store}/CDN_URLS.md", safe='/')
-
-                  f.write(f"### 📁 [{store}]({link})\n\n")
-                  f.write(f"- 圖片數量：{count} 張\n")
-                  f.write(f"- 餐點分類：{category_count} 個\n")
-                  f.write(f"- [進入店家圖片管理清單]({link})\n\n")
-                  f.write("---\n\n")
-
-          print("================================")
-          print(f"店家總數：{len(stores)}")
-          print(f"圖片總數：{total_images}")
-          print("CDN 圖片管理清單產生完成")
-          print("================================")
+          print("所有店家及餐點資料夾 CDN 清單產生完成")
           PY
 
       - name: Commit and Push changes
@@ -232,11 +158,12 @@ jobs:
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
 
-          git add -A -- '*/CDN_URLS.md' '*/CDN_PAGES/' CDN_URLS.md
+          # 自動加入所有新增、修改及刪除的清單
+          git add -A
 
           if git diff --cached --quiet; then
             echo "No changes detected."
           else
-            git commit -m "🤖 自動更新各店家 CDN 圖片管理清單"
+            git commit -m "🤖 自動更新所有店家及分類 CDN 清單"
             git push origin main
           fi
